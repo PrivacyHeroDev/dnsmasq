@@ -203,7 +203,7 @@ RESOLVFILE
 /* #define HAVE_CRYPTOHASH */
 /* #define HAVE_DNSSEC */
 /* #define HAVE_NFTSET */
-/* #define HAVE_REGEX */
+#define HAVE_REGEX
 /* #define HAVE_REGEX_IPSET */
 
 #define HAVE_STREAMLOCATOR_ADDRESS_MAP
