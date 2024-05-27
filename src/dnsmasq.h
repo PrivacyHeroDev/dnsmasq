@@ -598,6 +598,9 @@ struct server {
   pcre *regex;
   pcre_extra *pextra;
 #endif
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+  u8 address_map_subnet;
+#endif
   struct server *next;
   int serial, arrayposn;
   int last_server;
@@ -624,6 +627,9 @@ struct serv_addr4 {
   pcre *regex;
   pcre_extra *pextra;
 #endif
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+  u8 address_map_subnet;
+#endif
   struct server *next;
   struct in_addr addr;
 };
@@ -635,6 +641,9 @@ struct serv_addr6 {
   pcre *regex;
   pcre_extra *pextra;
 #endif
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+  u8 address_map_subnet;
+#endif
   struct server *next;
   struct in6_addr addr;
 };
@@ -645,6 +654,9 @@ struct serv_local {
 #ifdef HAVE_REGEX
   pcre *regex;
   pcre_extra *pextra;
+#endif
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+  u8 address_map_subnet;
 #endif
   struct server *next;
 };
@@ -1944,3 +1956,16 @@ int add_update_server(int flags,
 		      const char *interface,
 		      const char *domain,
 		      union all_addr *local_addr); 
+
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+u32 crc32b(const char *message);
+in_addr_t set_forward_ip(in_addr_t subnet, u8 bits, const char *domain);
+
+int add_update_server_address_map(int flags,
+              union mysockaddr *addr,
+              union mysockaddr *source_addr,
+              const char *interface,
+              const char *domain,
+              union all_addr *local_addr,
+              u8 address_map_subnet);
+#endif
