@@ -13,8 +13,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "dnsmasq.h"
+#ifdef HAVE_UBUS
+#include <libubox/blobmsg.h>
+#endif
 
 int extract_name(struct dns_header *header, size_t plen, unsigned char **pp, 
 		 char *name, int isExtract, int extrabytes)
@@ -384,10 +386,65 @@ static int private_net6(struct in6_addr *a, int ban_localhost)
     ((u32 *)a)[0] == htonl(0x20010db8); /* RFC 6303 4.6 */
 }
 
+#ifdef HAVE_UBUS
+static void ubus_dns_doctor_cb(struct blob_attr *msg, void *priv)
+{
+	static const struct blobmsg_policy policy = {
+		.name = "address",
+		.type = BLOBMSG_TYPE_STRING,
+	};
+	struct blob_attr *val;
+	char **dest = priv;
+
+	blobmsg_parse(&policy, 1, &val, blobmsg_data(msg), blobmsg_data_len(msg));
+	if (val)
+		*dest = blobmsg_get_string(val);
+}
+
+static int ubus_dns_doctor(const char *name, int ttl, void *p, int af)
+{
+	struct blob_buf *b;
+	char *addr;
+
+	if (!name)
+		return 0;
+
+	b = ubus_dns_notify_prepare();
+	if (!b)
+		return 0;
+
+	blobmsg_add_string(b, "name", name);
+
+	blobmsg_add_u32(b, "ttl", ttl);
+
+	blobmsg_add_string(b, "type", af == AF_INET6 ? "AAAA" : "A");
+
+	addr = blobmsg_alloc_string_buffer(b, "address", INET6_ADDRSTRLEN);
+	if (!addr)
+		return 0;
+
+	inet_ntop(af, p, addr, INET6_ADDRSTRLEN);
+	blobmsg_add_string_buffer(b);
+
+	addr = NULL;
+	ubus_dns_notify("dns_result", ubus_dns_doctor_cb, &addr);
+
+	if (!addr)
+		return 0;
+
+	return inet_pton(af, addr, p) == 1;
+}
+#else
+static int ubus_dns_doctor(const char *name, int ttl, void *p, int af)
+{
+	return 0;
+}
+#endif
+
 int do_doctor(struct dns_header *header, size_t qlen, char *namebuff)
 {
   unsigned char *p;
-  int i, qtype, qclass, rdlen;
+  int i, qtype, qclass, rdlen, ttl;
   int done = 0;
   
   if (!(p = skip_questions(header, qlen)))
@@ -404,7 +461,7 @@ int do_doctor(struct dns_header *header, size_t qlen, char *namebuff)
       
       GETSHORT(qtype, p); 
       GETSHORT(qclass, p);
-      p += 4; /* ttl */
+      GETLONG(ttl, p); /* ttl */
       GETSHORT(rdlen, p);
       
       if (qclass == C_IN && qtype == T_A)
@@ -415,6 +472,9 @@ int do_doctor(struct dns_header *header, size_t qlen, char *namebuff)
 	  if (!CHECK_LEN(header, p, qlen, INADDRSZ))
 	    return done;
 	  
+	  if (ubus_dns_doctor(daemon->namebuff, ttl, p, AF_INET))
+	    header->hb3 &= ~HB3_AA;
+
 	  /* alignment */
 	  memcpy(&addr.addr4, p, INADDRSZ);
 	  
@@ -443,6 +503,14 @@ int do_doctor(struct dns_header *header, size_t qlen, char *namebuff)
 	      log_query(F_FORWARD | F_CONFIG | F_IPV4, namebuff, &addr, NULL, 0);
 	      break;
 	    }
+	}
+      else if (qclass == C_IN && qtype == T_AAAA)
+        {
+	  if (!CHECK_LEN(header, p, qlen, IN6ADDRSZ))
+	    return 0;
+
+	  if (ubus_dns_doctor(daemon->namebuff, ttl, p, AF_INET6))
+	    header->hb3 &= ~HB3_AA;
 	}
       
       if (!ADD_RDLEN(header, p, qlen, rdlen))

@@ -105,10 +105,6 @@ int main (int argc, char **argv)
   
   read_opts(argc, argv, compile_opts);
  
-#ifdef HAVE_LINUX_NETWORK
-  daemon->kernel_version = kernel_version();
-#endif
-
   if (daemon->edns_pktsz < PACKETSZ)
     daemon->edns_pktsz = PACKETSZ;
 
@@ -2024,6 +2020,10 @@ static void check_dns_listeners(time_t now)
 		  close(pipefd[0]); /* close read end in child. */
 		  daemon->pipe_to_parent = pipefd[1];
 		}
+
+#ifdef HAVE_UBUS
+	      drop_ubus_listeners();
+#endif
 
 	      /* start with no upstream connections. */
 	      for (s = daemon->servers; s; s = s->next)

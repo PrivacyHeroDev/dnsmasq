@@ -27,47 +27,88 @@ void build_server_array(void)
 {
   struct server *serv;
   int count = 0;
+#ifdef HAVE_REGEX
+  int regexserverarrayidx = 0;
+  int regexlocaldomainarrayidx = 0;
+  int regexserverarraysz = 0;
+  int regexlocaldomainarraysz = 0;
+#endif
   
-  for (serv = daemon->servers; serv; serv = serv->next)
+  for (serv = daemon->servers; serv; serv = serv->next){
 #ifdef HAVE_LOOP
-    if (!(serv->flags & SERV_LOOP))
+    if (!(serv->flags & SERV_LOOP)){
+#endif
+#ifdef HAVE_REGEX
+    if(serv->regex)
+      ++regexserverarraysz;
+    else
 #endif
       {
 	count++;
 	if (serv->flags & SERV_WILDCARD)
 	  daemon->server_has_wildcard = 1;
       }
+    }
+  }
   
-  for (serv = daemon->local_domains; serv; serv = serv->next)
+  for (serv = daemon->local_domains; serv; serv = serv->next){
+#ifdef HAVE_REGEX
+    if(serv->regex)
+      ++regexlocaldomainarraysz;
+    else
+#endif
     {
       count++;
       if (serv->flags & SERV_WILDCARD)
 	daemon->server_has_wildcard = 1;
     }
+  }
   
   daemon->serverarraysz = count;
 
+#ifdef HAVE_REGEX
+  if (count > daemon->serverarrayhwm || (regexserverarraysz + regexlocaldomainarraysz) > (daemon->regexserverarraysz + daemon->regexlocaldomainarraysz))
+#else
   if (count > daemon->serverarrayhwm)
+#endif
     {
       struct server **new;
 
       count += 10; /* A few extra without re-allocating. */
 
+#ifdef HAVE_REGEX
+      if ((new = whine_malloc((count + regexserverarraysz + regexlocaldomainarraysz) * sizeof(struct server *))))
+#else
       if ((new = whine_malloc(count * sizeof(struct server *))))
+#endif
 	{
 	  if (daemon->serverarray)
 	    free(daemon->serverarray);
 	  
 	  daemon->serverarray = new;
 	  daemon->serverarrayhwm = count;
+#ifdef HAVE_REGEX
+    daemon->regexserverarraysz = regexserverarraysz;
+    daemon->regexlocaldomainarraysz = regexlocaldomainarraysz;
+#endif
 	}
     }
 
   count = 0;
+#ifdef HAVE_REGEX
+  regexserverarrayidx = daemon->serverarrayhwm;
+  regexlocaldomainarrayidx = regexserverarrayidx + daemon->regexserverarraysz;
+#endif
   
-  for (serv = daemon->servers; serv; serv = serv->next)
+  for (serv = daemon->servers; serv; serv = serv->next){
 #ifdef HAVE_LOOP
-    if (!(serv->flags & SERV_LOOP))
+    if (!(serv->flags & SERV_LOOP)){
+#endif
+#ifdef HAVE_REGEX
+    if(serv->regex){
+      daemon->serverarray[regexserverarrayidx++]=serv;
+      continue;
+    }else
 #endif
       {
 	daemon->serverarray[count] = serv;
@@ -75,9 +116,18 @@ void build_server_array(void)
 	serv->last_server = -1;
 	count++;
       }
+    }
+  }
   
-  for (serv = daemon->local_domains; serv; serv = serv->next, count++)
-    daemon->serverarray[count] = serv;
+  for (serv = daemon->local_domains; serv; serv = serv->next){
+#ifdef HAVE_REGEX
+    if(serv->regex){
+      daemon->serverarray[regexlocaldomainarrayidx++]=serv;
+      continue;
+    }else
+#endif
+    daemon->serverarray[count++] = serv;
+  }
   
   qsort(daemon->serverarray, daemon->serverarraysz, sizeof(struct server *), order_qsort);
   
@@ -86,6 +136,20 @@ void build_server_array(void)
   for (count = 0; count < daemon->serverarraysz; count++)
     if (!(daemon->serverarray[count]->flags & SERV_IS_LOCAL))
       daemon->serverarray[count]->arrayposn = count;
+
+#ifdef HAVE_REGEX
+  for (count = daemon->serverarrayhwm; count < daemon->serverarrayhwm + daemon->regexserverarraysz; ++count)
+    daemon->serverarray[count]->arrayposn = count;
+#endif
+
+#if 0 // print the whole array, for debug only
+  for(count=0; count < daemon->serverarrayhwm + daemon->regexserverarraysz + daemon->regexlocaldomainarraysz; ++count){
+    struct server* sv= daemon->serverarray[count];
+    if(sv)
+      printf("i = %d, flag=%u, p=%p, nextP=%p, domain = %s, sfd=%p\n",
+              count,  sv->flags,  sv,      sv->next,    sv->domain,   sv->sfd);
+  }
+#endif
 }
 
 /* we're looking for the server whose domain is the longest exact match
@@ -103,6 +167,11 @@ void build_server_array(void)
 */
 int lookup_domain(char *domain, int flags, int *lowout, int *highout)
 {
+#ifdef HAVE_REGEX
+  int needsearchregex = 1;
+  const char* originaldomain = domain;
+#endif
+  int founddomain = 0;
   int rc, crop_query, nodots;
   ssize_t qlen;
   int try, high, low = 0;
@@ -111,7 +180,7 @@ int lookup_domain(char *domain, int flags, int *lowout, int *highout)
 
   /* may be no configured servers. */
   if (daemon->serverarraysz == 0)
-    return 0;
+    goto search_regex;
   
   /* find query length and presence of '.' */
   for (cp = qdomain, nodots = 1, qlen = 0; *cp; qlen++, cp++)
@@ -255,9 +324,42 @@ int lookup_domain(char *domain, int flags, int *lowout, int *highout)
 
   /* qlen == -1 when we failed to match even an empty query, if there are no default servers. */
   if (nlow == nhigh || qlen == -1)
-    return 0;
-  
-  return 1;
+    goto search_regex;
+
+  founddomain = 1;
+
+search_regex:
+#ifdef HAVE_REGEX
+  if (founddomain){
+    if (daemon->serverarray[nlow]->domain_len > 0) // have found a valid upstream
+      needsearchregex = 0;
+  }
+
+  if (needsearchregex){
+    int found_regex = find_regex_server(originaldomain, 0, &low);
+
+    if(!found_regex && find_regex_server(originaldomain, 1, &low)){
+      found_regex=1;
+
+      // special step for parse "server=/:xxx:/#"
+      if(daemon->serverarray[low]->flags & SERV_USE_RESOLV){
+        if(filter_servers(try, F_SERVER, &nlow, &nhigh)){
+          low=nlow;
+        }
+      }
+    }
+
+    if(found_regex){
+      if (lowout)
+        *lowout = low;
+      if (highout)
+        *highout = low + 1;
+
+      founddomain = 1;
+    }
+  }
+#endif
+  return founddomain;
 }
 
 /* Return first server in group of equivalent servers; this is the "master" record. */
@@ -270,6 +372,14 @@ int filter_servers(int seed, int flags, int *lowout, int *highout)
 {
   int nlow = seed, nhigh = seed;
   int i;
+
+#ifdef HAVE_REGEX
+  if(nlow >= daemon->serverarrayhwm){
+    *lowout = nlow;
+    *highout = nlow+1;
+    return 1;
+  }
+#endif
   
   /* expand nlow and nhigh to cover all the records with the same domain 
      nlow is the first, nhigh - 1 is the last. nlow=nhigh means no servers,
@@ -365,6 +475,89 @@ int filter_servers(int seed, int flags, int *lowout, int *highout)
   
   return (nlow != nhigh);
 }
+
+#ifdef HAVE_REGEX
+// return flags, or 0 if not found
+// if argument domain is NULL, check the 'first' server is local answer, make sure 'first' is valid
+int is_local_regex_answer(const char *domain, int *first, int *last)
+{
+  int flags = 0;
+  int rc = 0;
+  int arraypos = 0;
+  int found = 1;
+
+  if(domain){
+    found = find_regex_server(domain, 1, &arraypos);
+    if(found){
+      *first = arraypos;
+      *last = *first + 1;
+    }
+  }else
+    arraypos = *first;
+
+  if(found){
+    struct server *r = daemon->serverarray[arraypos];
+
+    flags = r->flags;
+    if (flags & SERV_4ADDR)
+      rc = F_IPV4;
+    else if (flags & SERV_6ADDR)
+      rc = F_IPV6;
+    else if (flags & SERV_ALL_ZEROS)
+      rc = F_IPV4 | F_IPV6;
+  }
+  return rc;
+}
+
+// return 0 if failed to find
+int find_regex_server(const char* domain, int is_local, int *arraypos)
+{
+  int iFirst = daemon->serverarrayhwm;
+  int iLast = daemon->serverarrayhwm + daemon->regexserverarraysz;
+  const size_t domainLength = strlen(domain);
+
+  if (is_local){
+    iFirst = iLast;
+    iLast += daemon->regexlocaldomainarraysz;
+  }
+
+  while(iFirst < iLast){
+    struct server* r = daemon->serverarray[iFirst];
+    if (match_regex(r->regex, r->pextra, domain, domainLength)){
+      *arraypos=iFirst;
+      return 1;
+    }
+    ++iFirst;
+  }
+
+  return 0;
+}
+
+// return 0 if failed to match
+int match_regex(const pcre *regex, const pcre_extra *pextra, const char *str, size_t len)
+{
+	int captcount = 0;
+	int ret = 0;
+	if (pcre_fullinfo(regex, pextra, PCRE_INFO_CAPTURECOUNT, &captcount) == 0)
+	{
+		/* C99 dyn-array, or alloca must be used */
+		int ovect[(captcount + 1) * 3];
+		ret = pcre_exec(regex, pextra, str, len, 0, 0, ovect, (captcount + 1) * 3) > 0;
+	}
+	return ret;
+}
+
+const char *parse_regex_option(const char *arg, pcre **regex, pcre_extra **pextra)
+{
+  const char *error;
+  int erroff;
+  *regex = pcre_compile(arg, 0, &error, &erroff, NULL);
+  if(NULL == *regex)
+    return error;
+  *pextra = pcre_study(*regex, 0, &error);
+  return NULL;
+}
+#endif
 
 int is_local_answer(time_t now, int first, char *name)
 {
@@ -505,6 +698,9 @@ static int order(char *qdomain, size_t qlen, struct server *serv)
 static int order_servers(struct server *s1, struct server *s2)
 {
   int rc;
+#ifdef HAVE_REGEX
+  if(!s1) return -1;
+#endif
 
   /* need full comparison of dotless servers in 
      order_qsort() and filter_servers() */
@@ -626,6 +822,9 @@ int add_update_server(int flags,
 		      const char *domain,
 		      union all_addr *local_addr)
 {
+#ifdef HAVE_REGEX
+  const char* regex = NULL;
+#endif
   struct server *serv = NULL;
   char *alloc_domain;
   
@@ -641,10 +840,32 @@ int add_update_server(int flags,
       if (*domain != 0)
 	flags |= SERV_WILDCARD;
     }
-  
+#ifdef HAVE_REGEX
+  else{
+    size_t domainLen=strlen(domain);
+    char* regex_end=(char*)domain+domainLen-1;
+    if (domainLen > 2 && *domain == ':' && *regex_end == ':'){
+      const char* err = NULL;
+
+      ++domain; // skip leading ':'
+      --domainLen; // skip leading ':'
+
+      *regex_end = '\0'; // skip tailing ':'
+      regex = domain;
+
+      // call whine_malloc() instead of canonicalise()
+      if ((alloc_domain = whine_malloc(domainLen)))
+        memcpy(alloc_domain, domain, domainLen);
+    }
+  }
+#endif
+
   if (*domain == 0)
     alloc_domain = whine_malloc(1);
   else
+#ifdef HAVE_REGEX
+  if(!regex)
+#endif
     alloc_domain = canonicalise((char *)domain, NULL);
 
   if (!alloc_domain)
@@ -744,6 +965,16 @@ int add_update_server(int flags,
   serv->flags = flags;
   serv->domain = alloc_domain;
   serv->domain_len = strlen(alloc_domain);
+
+#ifdef HAVE_REGEX
+  if (regex){
+    const char* err = NULL;
+    if ((err = (char *)parse_regex_option(regex, &serv->regex, &serv->pextra))){
+      printf("parse_regex_option: %s\n", err);
+      return 0;
+    }
+  }
+#endif
   
   return 1;
 }

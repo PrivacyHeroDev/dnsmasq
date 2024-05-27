@@ -203,6 +203,8 @@ RESOLVFILE
 /* #define HAVE_CRYPTOHASH */
 /* #define HAVE_DNSSEC */
 /* #define HAVE_NFTSET */
+/* #define HAVE_REGEX */
+/* #define HAVE_REGEX_IPSET */
 
 /* Default locations for important system files. */
 
@@ -392,6 +394,15 @@ static char *compile_opts =
 "no-"
 #endif
 "i18n "
+#ifndef HAVE_REGEX
+"no-"
+#endif
+"regex"
+#if defined(HAVE_REGEX) && defined(HAVE_REGEX_IPSET) && (defined(HAVE_IPSET) || defined(HAVE_NFTSET))
+"(+ipset,nftset) "
+#else
+" "
+#endif
 #if defined(HAVE_LIBIDN2)
 "IDN2 "
 #else

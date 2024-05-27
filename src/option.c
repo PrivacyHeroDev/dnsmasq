@@ -3176,6 +3176,18 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 	     while ((end = split_chr(arg, '/'))) 
 	       {
 		 char *domain = NULL;
+#if defined(HAVE_REGEX) && defined(HAVE_REGEX_IPSET)
+		char *real_end = arg + strlen(arg);
+		if (*arg == ':' && *(real_end - 1) == ':'){
+			const char *error = NULL;
+			*(real_end - 1) = '\0';
+			ipsets->next = opt_malloc(sizeof(struct ipsets));
+			ipsets = ipsets->next;
+			memset(ipsets, 0, sizeof(struct ipsets));
+			if ((error = parse_regex_option(arg + 1, &ipsets->regex, &ipsets->pextra)))
+				ret_err(error);
+		}else{
+#endif
 		 /* elide leading dots - they are implied in the search algorithm */
 		 while (*arg == '.')
 		   arg++;
@@ -3188,6 +3200,9 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 		 ipsets = ipsets->next;
 		 memset(ipsets, 0, sizeof(struct ipsets));
 		 ipsets->domain = domain;
+#if defined(HAVE_REGEX) && defined(HAVE_REGEX_IPSET)
+		}
+#endif
 		 arg = end;
 	       }
 	   } 

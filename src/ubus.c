@@ -72,6 +72,13 @@ static struct ubus_object ubus_object = {
   .subscribe_cb = ubus_subscribe_cb,
 };
 
+static struct ubus_object_type ubus_dns_object_type =
+   { .name = "dnsmasq.dns" };
+
+static struct ubus_object ubus_dns_object = {
+	.type = &ubus_dns_object_type,
+};
+
 static void ubus_subscribe_cb(struct ubus_context *ctx, struct ubus_object *obj)
 {
   (void)ctx;
@@ -105,13 +112,21 @@ static void ubus_disconnect_cb(struct ubus_context *ubus)
 char *ubus_init()
 {
   struct ubus_context *ubus = NULL;
+  char *dns_name;
   int ret = 0;
 
   if (!(ubus = ubus_connect(NULL)))
     return NULL;
   
+  dns_name = whine_malloc(strlen(daemon->ubus_name) + 5);
+  sprintf(dns_name, "%s.dns", daemon->ubus_name);
+
   ubus_object.name = daemon->ubus_name;
+  ubus_dns_object.name = dns_name;
+
   ret = ubus_add_object(ubus, &ubus_object);
+  if (!ret)
+    ret = ubus_add_object(ubus, &ubus_dns_object);
   if (ret)
     {
       ubus_destroy(ubus);
@@ -180,6 +195,17 @@ void check_ubus_listeners()
 	return (UBUS_STATUS_UNKNOWN_ERROR); \
       } \
   } while (0)
+
+void drop_ubus_listeners()
+{
+  struct ubus_context *ubus = (struct ubus_context *)daemon->ubus;
+
+  if (!ubus)
+    return;
+
+  ubus_free(ubus);
+  daemon->ubus = NULL;
+}
 
 static int ubus_handle_metrics(struct ubus_context *ctx, struct ubus_object *obj,
 			       struct ubus_request_data *req, const char *method,
@@ -327,6 +353,53 @@ fail:
 	return; \
       } \
   } while (0)
+
+int ubus_dns_notify_has_subscribers(void)
+{
+	return (daemon->ubus && ubus_dns_object.has_subscribers);
+}
+
+struct blob_buf *ubus_dns_notify_prepare(void)
+{
+	if (!ubus_dns_notify_has_subscribers())
+		return NULL;
+
+	blob_buf_init(&b, 0);
+	return &b;
+}
+
+struct ubus_dns_notify_req {
+	struct ubus_notify_request req;
+	ubus_dns_notify_cb cb;
+	void *priv;
+};
+
+static void dns_notify_cb(struct ubus_notify_request *req, int type, struct blob_attr *msg)
+{
+	struct ubus_dns_notify_req *dreq = container_of(req, struct ubus_dns_notify_req, req);
+
+	dreq->cb(msg, dreq->priv);
+}
+
+int ubus_dns_notify(const char *type, ubus_dns_notify_cb cb, void *priv)
+{
+	struct ubus_context *ubus = (struct ubus_context *)daemon->ubus;
+	struct ubus_dns_notify_req dreq;
+	int ret;
+
+	if (!ubus || !ubus_dns_object.has_subscribers)
+		return 0;
+
+	ret = ubus_notify_async(ubus, &ubus_dns_object, type, b.head, &dreq.req);
+	if (ret)
+		return ret;
+
+	dreq.req.data_cb = dns_notify_cb;
+	dreq.cb = cb;
+	dreq.priv = priv;
+
+	return ubus_complete_request(ubus, &dreq.req.req, 100);
+}
 
 void ubus_event_bcast(const char *type, const char *mac, const char *ip, const char *name, const char *interface)
 {

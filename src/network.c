@@ -1671,6 +1671,10 @@ void check_servers(int no_loop_check)
 	    s1 = _("unqualified"), s2 = _("names");
 	  else if (strlen(serv->domain) == 0)
 	    s1 = _("default"), s2 = "";
+#ifdef HAVE_REGEX
+    else if (serv->regex)
+      s1 = _("regex domain"), s2 = serv->domain;
+#endif
 	  else
 	    s1 = _("domain"), s2 = serv->domain, s4 = (serv->flags & SERV_WILDCARD) ? "*" : "";
 	  
@@ -1700,8 +1704,14 @@ void check_servers(int no_loop_check)
 	   if (++locals <= LOCALS_LOGGED)
 	     my_syslog(LOG_INFO, _("using only locally-known addresses for %s"), serv->domain);
 	 }
-       else if (serv->flags & SERV_USE_RESOLV)
+       else if (serv->flags & SERV_USE_RESOLV){
+#ifdef HAVE_REGEX
+    if (serv->regex)
+      my_syslog(LOG_INFO, _("using standard nameservers for regex domain %s"), serv->domain);
+    else
+#endif
 	 my_syslog(LOG_INFO, _("using standard nameservers for %s"), serv->domain);
+       }
     }
   
   if (locals > LOCALS_LOGGED)
