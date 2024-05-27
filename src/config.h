@@ -206,6 +206,8 @@ RESOLVFILE
 /* #define HAVE_REGEX */
 /* #define HAVE_REGEX_IPSET */
 
+#define HAVE_STREAMLOCATOR_ADDRESS_MAP
+
 /* Default locations for important system files. */
 
 #ifndef LEASEFILE

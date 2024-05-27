@@ -193,6 +193,10 @@ struct myoption {
 #define LOPT_MAX_PROCS     384
 #define LOPT_DNSSEC_LIMITS 385
 
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+#define LOPT_ADDRESS_MAP      400
+#endif
+
 #ifdef HAVE_GETOPT_LONG
 static const struct option opts[] =  
 #else
@@ -238,6 +242,9 @@ static const struct myoption opts[] =
     { "rev-server", 1, 0, LOPT_REV_SERV },
     { "local", 1, 0, LOPT_LOCAL },
     { "address", 1, 0, 'A' },
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+    { "address-map", 1, 0, LOPT_ADDRESS_MAP },
+#endif
     { "conf-file", 2, 0, 'C' },
     { "conf-script", 1, 0, LOPT_CONF_SCRIPT },
     { "no-resolv", 0, 0, 'R' },
@@ -406,6 +413,9 @@ static struct {
 } usage[] = {
   { 'a', ARG_DUP, "<ipaddr>",  gettext_noop("Specify local address(es) to listen on."), NULL },
   { 'A', ARG_DUP, "/<domain>/<ipaddr>", gettext_noop("Return ipaddr for all hosts in specified domains."), NULL },
+#ifdef LOPT_ADDRESS_MAP
+  { LOPT_ADDRESS_MAP, ARG_DUP, "/<domain>/<ipaddr>!<subnet mask>", gettext_noop("Return ipaddr for all hosts in specified domains. Set the subnet mask by hashing the hostname."), NULL },
+#endif
   { 'b', OPT_BOGUSPRIV, NULL, gettext_noop("Fake reverse lookups for RFC1918 private address ranges."), NULL },
   { 'B', ARG_DUP, "<ipaddr>", gettext_noop("Treat ipaddr as NXDOMAIN (defeats Verisign wildcard)."), NULL }, 
   { 'c', ARG_ONE, "<integer>", gettext_noop("Specify the size of the cache in entries (defaults to %s)."), "$" },
@@ -3005,6 +3015,9 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
     case 'S':            /*  --server */
     case LOPT_LOCAL:     /*  --local */
     case 'A':            /*  --address */
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+    case LOPT_ADDRESS_MAP:  /*  --address-map */
+#endif
       {
 	char *lastdomain = NULL, *domain = "", *cur_domain;
 	u16 flags = 0;
@@ -3020,6 +3033,10 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 	sdetails.interface = interface;
 	sdetails.flags = &flags;
 			
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+    u8 address_map_subnet = 32;
+#endif
+
 	unhide_metas(arg);
 	
 	/* split the domain args, if any and skip to the end of them. */
@@ -3038,8 +3055,32 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 	
 	if (!arg || !*arg)
 	  flags = SERV_LITERAL_ADDRESS;
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+    else if (option == 'A' || option == LOPT_ADDRESS_MAP)
+#else
 	else if (option == 'A')
+#endif
 	  {
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+        if (option == LOPT_ADDRESS_MAP) {
+            char* address_map_subnet_str = split_chr(arg, '!');
+
+            if (address_map_subnet_str == NULL || *address_map_subnet_str == '\0') {
+                ret_err(_("Bad address map format"));
+            }
+
+            int subnet = -1;
+            if (!atoi_check(address_map_subnet_str, &subnet)) {
+                ret_err(_("Failed to parse subnet from address map"));
+            }
+            if (subnet < 0 || subnet > 32) {
+                ret_err(_("Subnet must be between 0 and 32"));
+            }
+
+            address_map_subnet = subnet;
+        }
+#endif
+
 	    /* # as literal address means return zero address for 4 and 6 */
 	    if (strcmp(arg, "#") == 0)
 	      flags = SERV_ALL_ZEROS | SERV_LITERAL_ADDRESS;
@@ -3086,8 +3127,13 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 		      cur_domain[0] = 0;
 		  }
 		
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+        if (!add_update_server_address_map(flags, sdetails.addr, sdetails.source_addr, sdetails.interface, cur_domain, &addr, address_map_subnet))
+            ret_err(gen_err);
+#else
 		if (!add_update_server(flags, sdetails.addr, sdetails.source_addr, sdetails.interface, cur_domain, &addr))
 		  ret_err(gen_err);
+#endif
 		
 		if (!lastdomain || cur_domain == lastdomain)
 		  break;

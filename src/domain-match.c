@@ -613,6 +613,11 @@ size_t make_local_answer(int flags, int gotname, size_t size, struct dns_header 
 
 	if (srv->flags & SERV_ALL_ZEROS)
 	  memset(&addr, 0, sizeof(addr));
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+    else if (srv->address_map_subnet != 32) {
+      addr.addr4.s_addr = set_forward_ip(srv->addr.s_addr, srv->address_map_subnet, name);
+    }
+#endif
 	else
 	  addr.addr4 = srv->addr;
 	
@@ -820,8 +825,20 @@ int add_update_server(int flags,
 		      union mysockaddr *source_addr,
 		      const char *interface,
 		      const char *domain,
-		      union all_addr *local_addr)
+                      union all_addr *local_addr) {
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+    return add_update_server_address_map(flags, addr, source_addr, interface, domain, local_addr, 32);
+}
+
+int add_update_server_address_map(int flags,
+		      union mysockaddr *addr,
+		      union mysockaddr *source_addr,
+		      const char *interface,
+		      const char *domain,
+		      union all_addr *local_addr,
+              u8 address_map_subnet)
 {
+#endif
 #ifdef HAVE_REGEX
   const char* regex = NULL;
 #endif
@@ -966,6 +983,10 @@ int add_update_server(int flags,
   serv->domain = alloc_domain;
   serv->domain_len = strlen(alloc_domain);
 
+#ifdef HAVE_STREAMLOCATOR_ADDRESS_MAP
+  serv->address_map_subnet = address_map_subnet;
+#endif
+
 #ifdef HAVE_REGEX
   if (regex){
     const char* err = NULL;
@@ -979,3 +1000,24 @@ int add_update_server(int flags,
   return 1;
 }
 
+u32 crc32b(const char *message) {
+    u32 crc = 0xFFFFFFFF;
+    int loop;
+
+    while (*message) {
+        crc = crc ^ *message++;
+        loop=8;
+        while (loop--) {
+            crc = (crc >> 1) ^ (0xEDB88320 & (-(crc&1)));
+        }
+    }
+    return ~crc;
+}
+
+in_addr_t set_forward_ip(in_addr_t subnet, u8 mask, const char *domain) {
+    u32 net_mask = 0xFFFFFFFF << (32-mask);
+    u32 crc_mask = net_mask ^ 0xFFFFFFFF;
+
+    u32 result = (ntohl(subnet) & net_mask) | (crc32b(domain) & crc_mask);
+    return htonl(result);
+}
