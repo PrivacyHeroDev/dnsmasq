@@ -2789,8 +2789,9 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
       memset(ipsets, 0, sizeof(struct ipsets));
       ipsets->regex = pcre_compile(regex, 0, &error, &erroff, NULL);
       ipsets->nregex = nregex;
+	  ipsets->pattern = strdup(regex); // Save a copy of this regexes pattern for debugging.
 
-      if (!ipsets->regex)
+	  if (!ipsets->regex)
         my_syslog(LOG_INFO, _("Failed to compile regex pattern %s, error: %s"), regex, error);
       ipsets->pextra = pcre_study(ipsets->regex, 0, &error);
       ipsets->domain_type = IPSET_IS_REGEX;

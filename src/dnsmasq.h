@@ -589,6 +589,7 @@ struct ipsets {
   pcre_extra *pextra;
   unsigned char nregex;
   unsigned char domain_type;
+  char *pattern;
 #endif
 #endif
 };

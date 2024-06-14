@@ -681,7 +681,11 @@ static size_t process_reply(struct dns_header *header, time_t now, struct server
        /* C99 dyn-array, or alloca must be used */
        int ovect[(captcount + 1) * 3];
        if (pcre_exec(ipset_pos->regex, ipset_pos->pextra, daemon->namebuff, namelen, 0, 0, ovect, (captcount + 1) * 3) > 0){
-         if (!ipset_pos->nregex) {
+  		 if (option_bool(OPT_EXTRALOG)) {
+			 my_syslog(LOG_INFO, _("IPSET Regex Match %s = %s"), daemon->namebuff, ipset_pos->pattern);
+		 }
+
+		 if (!ipset_pos->nregex) {
          sets = ipset_pos->sets;
          } else {
          sets = 0;
