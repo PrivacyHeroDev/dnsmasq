@@ -18,7 +18,7 @@ readonly openwrt_tag="${1}"
 readonly regex_patch_branch="${2}"
 
 if [ -z "${openwrt_tag}" ] || [ -z "${regex_patch_branch}" ]; then
-    echo "Usage: ${0} <openwrt_tag> <regex_patch_branch>"
+    echo "Usage: ${0} <dnsmasq_tag> <regex_patch_branch>"
     exit 1
 fi
 
