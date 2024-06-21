@@ -32,9 +32,9 @@ You must not include any code from the previous patch commit when merging.
 ---
 config:
   gitGraph:
+    mainBranchName: openwrt-23.05
     parallelCommits: true
 ---
-%%{init: { 'gitGraph': {'mainBranchName': 'openwrt-23.05'}} }%%
 gitGraph TB:
     commit tag: "v2.90"
     branch openwrt-24.01
